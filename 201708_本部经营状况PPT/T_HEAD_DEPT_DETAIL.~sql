@@ -1,0 +1,234 @@
+/***********ETL逻辑说明**********
+
+作者：张星辰
+初始创建日期：2017/8/1
+最后更新日期：2017/8/1
+
+中间表及用途：
+1. temp_sign_base: 预处理t_sign_base
+2. temp_dept_sign: 按照1、2级部门汇总
+3. temp_receipt_base: 预处理t_receipt_base
+4. temp_dept_receipt: 按照1、2级部门汇总
+5.
+6.
+7.
+8.
+
+*/
+
+--1. 预处理t_sign_base
+WITH TEMP_SIGN_BASE AS
+ (SELECT FY_YEAR,
+         PERIOD_MONTH,
+         TRUNC(BOOKED_DATE, 'mm') AS CALENDAR_DATE,
+         DEPT_CODE_LEVEL1,
+         DEPT_NAME_LEVEL1,
+         M_DEPT_CODE_LEVEL2,
+         M_DEPT_NAME_LEVEL2,
+         DEPT_OWN,
+         OU_GROUP_CODE,
+         OU_GROUP,
+         T2.ORDER_TYPE_NAME,
+         T2.NEW_CONTRACT_NAME,
+         'T_SIGN_BASE' AS DATA_SOURCE,
+         CONTRACT_AMOUNT * EXCHANGE_RATE AS CONTRACT_AMOUNT
+    FROM T_SIGN_BASE@LINKBIDW T1
+    LEFT JOIN (SELECT DISTINCT ORDER_TYPE_NAME, NEW_CONTRACT_NAME
+                FROM T_MAP_CONTRACT_TYPE) T2
+      ON T1.ORDER_TYPE_NAME = T2.ORDER_TYPE_NAME
+   WHERE OU_GROUP_CODE = '101'
+     AND DEPT_OWN = '本部'
+     AND T1.ORDER_TYPE_NAME <> '提前执行'),
+
+--2. 按照1、2级部门汇总
+TEMP_DEPT_SIGN AS
+ (
+  --2.1 一级部门签约
+  SELECT FY_YEAR,
+          PERIOD_MONTH,
+          CALENDAR_DATE,
+          DEPT_CODE_LEVEL1 AS DEPT_NUM,
+          DEPT_NAME_LEVEL1 AS DEPT_NAME,
+          '1' AS DEPT_LEVEL,
+          DEPT_OWN,
+          OU_GROUP_CODE,
+          OU_GROUP,
+          NEW_CONTRACT_NAME,
+          DATA_SOURCE,
+          'CONTRACT_AMOUNT' AS METRIC_EN,
+          SUM(CONTRACT_AMOUNT) AS METRIC_VALUE
+    FROM TEMP_SIGN_BASE
+   GROUP BY FY_YEAR,
+             PERIOD_MONTH,
+             CALENDAR_DATE,
+             DEPT_CODE_LEVEL1,
+             DEPT_NAME_LEVEL1,
+             DEPT_OWN,
+             NEW_CONTRACT_NAME,
+             OU_GROUP_CODE,
+             OU_GROUP,
+             DATA_SOURCE
+  
+  UNION ALL
+  --2.2 二级部门签约
+  SELECT FY_YEAR,
+         PERIOD_MONTH,
+         CALENDAR_DATE,
+         M_DEPT_CODE_LEVEL2 AS DEPT_NUM,
+         M_DEPT_NAME_LEVEL2 AS DEPT_NAME,
+         '2' AS DEPT_LEVEL,
+         DEPT_OWN,
+         OU_GROUP_CODE,
+         OU_GROUP,
+         NEW_CONTRACT_NAME,
+         DATA_SOURCE,
+         'CONTRACT_AMOUNT' AS METRIC_EN,
+         SUM(CONTRACT_AMOUNT) AS METRIC_VALUE
+    FROM TEMP_SIGN_BASE
+   WHERE M_DEPT_CODE_LEVEL2 IS NOT NULL
+   GROUP BY FY_YEAR,
+            PERIOD_MONTH,
+            CALENDAR_DATE,
+            M_DEPT_CODE_LEVEL2,
+            M_DEPT_NAME_LEVEL2,
+            DEPT_OWN,
+            NEW_CONTRACT_NAME,
+            OU_GROUP_CODE,
+            OU_GROUP,
+            DATA_SOURCE),
+
+--3. 预处理t_receipt_base
+TEMP_RECEIPT_BASE AS
+ (SELECT FY_YEAR,
+         PERIOD_MONTH,
+         TRUNC(PERIOD, 'mm') AS CALENDAR_DATE,
+         DEPT_CODE_LEVEL1,
+         DEPT_NAME_LEVEL1,
+         M_DEPT_CODE_LEVEL2,
+         M_DEPT_NAME_LEVEL2,
+         DEPT_OWN,
+         OU_GROUP_CODE,
+         OU_GROUP,
+         T1.ORDER_TYPE_NAME,
+         T2.NEW_CONTRACT_NAME,
+         'T_RECEIPT_BASE' AS DATA_SOURCE,
+         FIN_RECIEPT * EXCHANGE_RATE AS FIN_RECIEPT
+    FROM T_RECEIPT_BASE@LINKBIDW T1
+    LEFT JOIN (SELECT DISTINCT ORDER_TYPE_NAME, NEW_CONTRACT_NAME
+                FROM T_MAP_CONTRACT_TYPE) T2
+      ON T1.ORDER_TYPE_NAME = T2.ORDER_TYPE_NAME
+   WHERE OU_GROUP_CODE = '101'
+     AND DEPT_OWN = '本部'),
+
+--4. 按照1、2级部门汇总
+TEMP_DEPT_RECEIPT AS
+ (
+  -- 4.1一级部门收入
+  SELECT FY_YEAR,
+          PERIOD_MONTH,
+          CALENDAR_DATE,
+          DEPT_CODE_LEVEL1 AS DEPT_NUM,
+          DEPT_NAME_LEVEL1 AS DEPT_NAME,
+          '1' AS DEPT_LEVEL,
+          DEPT_OWN,
+          OU_GROUP_CODE,
+          OU_GROUP,
+          NEW_CONTRACT_NAME,
+          DATA_SOURCE,
+          'FIN_RECEIPT' AS METRIC_EN,
+          SUM(FIN_RECIEPT) AS METRIC_VALUE
+    FROM TEMP_RECEIPT_BASE T
+   GROUP BY FY_YEAR,
+             PERIOD_MONTH,
+             CALENDAR_DATE,
+             DEPT_CODE_LEVEL1,
+             DEPT_NAME_LEVEL1,
+             DEPT_OWN,
+             OU_GROUP_CODE,
+             OU_GROUP,
+             NEW_CONTRACT_NAME,
+             DATA_SOURCE
+  
+  UNION ALL
+  -- 4.2 二级部门收入
+  SELECT FY_YEAR,
+         PERIOD_MONTH,
+         CALENDAR_DATE,
+         M_DEPT_CODE_LEVEL2 AS DEPT_NUM,
+         M_DEPT_NAME_LEVEL2 AS DEPT_NAME,
+         '2' AS DEPT_LEVEL,
+         DEPT_OWN,
+         OU_GROUP_CODE,
+         OU_GROUP,
+         NEW_CONTRACT_NAME,
+         DATA_SOURCE,
+         'FIN_RECEIPT' AS METRIC_EN,
+         SUM(FIN_RECIEPT) AS METRIC_VALUE
+    FROM TEMP_RECEIPT_BASE T
+   WHERE M_DEPT_CODE_LEVEL2 IS NOT NULL
+   GROUP BY FY_YEAR,
+            PERIOD_MONTH,
+            CALENDAR_DATE,
+            M_DEPT_CODE_LEVEL2,
+            M_DEPT_NAME_LEVEL2,
+            DEPT_OWN,
+            OU_GROUP_CODE,
+            OU_GROUP,
+            NEW_CONTRACT_NAME,
+            DATA_SOURCE),
+
+--5. 合并数据集            
+TEMP_UNION AS
+ (SELECT *
+    FROM TEMP_DEPT_RECEIPT
+  UNION ALL
+  SELECT * FROM TEMP_DEPT_SIGN),
+
+--6. 生成维度的笛卡尔积
+TEMP_CARTESIAN AS
+ (SELECT DISTINCT FY_YEAR,
+                  T2.PERIOD_MONTH,
+                  ADD_MONTHS(TO_DATE(T1.FY_YEAR || T2.PERIOD_MONTH, 'yyyymm'),
+                             3) AS CALENDAR_DATE,
+                  DEPT_NUM,
+                  DEPT_NAME,
+                  DEPT_LEVEL,
+                  DEPT_OWN,
+                  OU_GROUP_CODE,
+                  OU_GROUP,
+                  NEW_CONTRACT_NAME,
+                  DATA_SOURCE,
+                  METRIC_EN
+    FROM TEMP_UNION T1,
+         (SELECT ROWNUM AS PERIOD_MONTH FROM DUAL CONNECT BY ROWNUM <= 12) T2)
+
+--7. 初步整理后的数据集
+
+SELECT T1.*,
+       NVL(T2.METRIC_VALUE, 0) AS METRIC_VALUE
+--       NVL(D2.METRIC_VALUE, 0) AS METRIC_VALUE_PP
+  FROM TEMP_CARTESIAN T1
+
+  LEFT JOIN TEMP_UNION T2
+    ON T1.CALENDAR_DATE = T2.CALENDAR_DATE
+   AND T1.DEPT_NUM = T2.DEPT_NUM
+   AND T1.DEPT_LEVEL = T2.DEPT_LEVEL
+   AND T1.OU_GROUP_CODE = T2.OU_GROUP_CODE
+   AND T1.NEW_CONTRACT_NAME = T2.NEW_CONTRACT_NAME
+   AND T1.DATA_SOURCE = T2.DATA_SOURCE
+   AND T1.METRIC_EN = T2.METRIC_EN;
+   
+/* ORDER BY T1.DEPT_NAME,
+          T1.DEPT_NUM,
+          T1.DEPT_LEVEL,
+          T1.METRIC_EN,
+          T1.CALENDAR_DATE)*/
+
+  LEFT JOIN TEMP_DATA D2
+    ON T1.CALENDAR_DATE = ADD_MONTHS(D2.CALENDAR_DATE, 1)
+   AND T1.DEPT_NUM = D2.DEPT_NUM
+   AND T1.DEPT_LEVEL = D2.DEPT_LEVEL
+   AND T1.OU_GROUP_CODE = D2.OU_GROUP_CODE
+   AND T1.NEW_CONTRACT_NAME = D2.NEW_CONTRACT_NAME
+   AND T1.DATA_SOURCE = D2.DATA_SOURCE
+   AND T1.METRIC_EN = D2.METRIC_EN;
